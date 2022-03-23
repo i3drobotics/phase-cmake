@@ -1,6 +1,8 @@
 # CMake Project
 Example CMake Project to integrate Phase C++ library.
 
+**NOTE: This package is still in development. Updates coming soon.**
+
 ## Dependencies
 Phase library is required to be installed for use in the build process.  
 ### Linux
