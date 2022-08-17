@@ -43,9 +43,9 @@ jobs:
           mkdir -p build && cd build
           sudo apt-get update && cmake -DPhase_DIR="./phase_install/lib/cmake" -DCMAKE_INSTALL_PREFIX="../install" ..
           make -j$(nproc)
-      # Unit Test
-      - name: Unit Test
+      # Test
+      - name: Test
         shell: bash
         run: |
-          cd install/bin
+          cd build/bin
           ./phase_sample

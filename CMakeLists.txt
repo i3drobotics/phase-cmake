@@ -46,3 +46,56 @@ install(TARGETS ${PROJECT_NAME_LOWER}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
+
+# Get Phase library files
+set(PHASE_ROOT_DIR "${Phase_DIR}/../..")
+get_filename_component(PHASE_ROOT_DIR "${PHASE_ROOT_DIR}" ABSOLUTE)
+set(PHASE_BIN_DIR 
+    "${PHASE_ROOT_DIR}/bin"
+)
+set(PHASE_LIB_DIR 
+    "${PHASE_ROOT_DIR}/lib"
+)
+if (WIN32)
+    file (GLOB PHASE_LIBRARY_FILES
+        "${PHASE_BIN_DIR}/*.dll"
+    )
+elseif(UNIX)
+    file (GLOB PHASE_CORE_LIBRARY_FILES
+        "${PHASE_LIB_DIR}/*.so"
+        "${PHASE_LIB_DIR}/*.so*"
+    )
+    file (GLOB PHASE_I3DRSGM_LIBRARY_FILES
+        "${PHASE_LIB_DIR}/i3drsgm/*.so"
+        "${PHASE_LIB_DIR}/i3drsgm/*.so*"
+    )
+    set (PHASE_LIBRARY_FILES
+        ${PHASE_CORE_LIBRARY_FILES}
+        ${PHASE_I3DRSGM_LIBRARY_FILES}
+    )
+endif()
+
+# Install Phase libraries
+set(rpath_origin "\\$$ORIGIN")
+if (UNIX)
+    foreach(PHASE_LIBRARY_FILEPATH ${PHASE_LIBRARY_FILES})
+        get_filename_component(PHASE_LIBRARY_FILE "${PHASE_LIBRARY_FILEPATH}" NAME)
+        get_filename_component(PHASE_LIBRARY_FILE_EXT "${PHASE_LIBRARY_FILEPATH}" EXT)
+        # copy library file to target directory
+        add_custom_command(TARGET ${PROJECT_NAME} PRE_BUILD
+                        COMMAND cp -a -u
+                        ${PHASE_LIBRARY_FILEPATH} $<TARGET_FILE_DIR:${PROJECT_NAME}>/)
+        # change rpath for dynamic library to find dependencies in local directory
+        add_custom_command(TARGET ${PROJECT_NAME} PRE_BUILD
+            COMMAND patchelf --set-rpath ${rpath_origin} $<TARGET_FILE_DIR:${PROJECT_NAME}>/${PHASE_LIBRARY_FILE}
+        )
+    endforeach()
+endif()
+
+if (UNIX)
+    # change rpath to find dependencies in local directory
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND patchelf --set-rpath ${rpath_origin}
+        $<TARGET_FILE:${PROJECT_NAME}>
+    )
+endif()
