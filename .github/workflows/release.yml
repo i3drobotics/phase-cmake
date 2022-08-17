@@ -1,0 +1,218 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+        level:
+          type: choice
+          description: Release type
+          options: 
+          - patch
+          - minor
+          - major
+          - prerelease
+
+env:
+  PHASE_VERSION: v0.1.2-4
+  PHASE_REPO: i3drobotics/phase
+
+jobs:
+  versioning:
+    runs-on: ubuntu-20.04
+    steps:
+      # Get latest released version
+      - uses: oprypin/find-latest-tag@v1
+        with:
+          repository: i3drobotics/phase-cmake  # The repository to scan.
+          releases-only: true  # All relevant tags have a GitHub release for them.
+        id: latest-tag  # The step ID to refer to later.
+      # Generate new release version
+      - name: Generate new version
+        uses: actions-ecosystem/action-bump-semver@v1
+        id: bump-version
+        with:
+          current_version: ${{ steps.latest-tag.outputs.tag }}
+          level: ${{ github.event.inputs.level }}
+      # Add generated version to VERSION file
+      # remove 'v' character from version string
+      - name: Add to Version file
+        shell: bash
+        run: |
+          PROJ_VERSION=${{ steps.bump-version.outputs.new_version }}
+          PROJ_VERSION=${PROJ_VERSION:1}
+          echo "$PROJ_VERSION" > version.txt
+      # Upload version file for use in other jobs
+      - name: Archive version file
+        uses: actions/upload-artifact@v2
+        with:
+          name: version-file-${{ github.sha }}-phase-cmake-release
+          path: version.txt
+
+
+  # Build / test on Ubuntu
+  build-ubuntu:
+    needs: [versioning]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-20.04]
+  
+    steps:
+      - uses: actions/checkout@v2
+      # Get project version
+      - name: Download version file artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: version-file-${{ github.sha }}-phase-cmake-release
+          path: versioning
+      - name: Get project version
+        shell: bash
+        run: |
+          PROJ_VER=$(cat versioning/version.txt)
+          echo "$PROJ_VER" > version.txt
+          echo "PROJ_VER=$PROJ_VER" >> $GITHUB_ENV
+      # Install Phase
+      - name: Download Phase
+        shell: bash
+        run: |
+          curl --output phase-${{ env.PHASE_VERSION }}-${{ matrix.os }}-x86_64.tar.gz -L https://github.com/i3drobotics/phase/releases/download/${{ env.PHASE_VERSION }}/phase-${{ env.PHASE_VERSION }}-${{ matrix.os }}-x86_64.tar.gz
+      - name: Install Phase
+        shell: bash
+        run: |
+          mkdir phase_install
+          tar -xf phase-${{ env.PHASE_VERSION }}-${{ matrix.os }}-x86_64.tar.gz -C ./phase_install
+          sudo apt update
+          sudo apt install -y libavcodec-dev libavformat-dev libswscale-dev
+          sudo apt install -y libgl-dev liblapack-dev libblas-dev libgtk2.0-dev
+          sudo apt install -y libgstreamer1.0-0 libgstreamer-plugins-base1.0-0
+          sudo apt install -y zlib1g libstdc++6
+          sudo apt install -y libc6 libgcc1
+      # Build
+      - name: Build
+        shell: bash
+        run: |
+          mkdir -p build && cd build
+          sudo apt-get update && cmake -DPhase_DIR="./phase_install/lib/cmake" ..
+          make -j$(nproc)
+      # Unit Test
+      - name: Unit Test
+        shell: bash
+        run: |
+          cd build
+          ./phase_sample
+
+  # Build / test on Windows
+  build-windows:
+    needs: [versioning]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-2019]
+
+    steps:
+      - uses: actions/checkout@v2
+      # Get project version
+      - name: Download version file artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: version-file-${{ github.sha }}-phase-cmake-release
+          path: versioning
+      - name: Get project version
+        shell: bash
+        run: |
+          PROJ_VER=$(cat versioning/version.txt)
+          echo "$PROJ_VER" > version.txt
+          echo "PROJ_VER=$PROJ_VER" >> $GITHUB_ENV
+      # Install Phase
+      - name: Download Phase
+        shell: bash
+        run: |
+          curl --output phase-${{ env.PHASE_VERSION }}-windows-x86_64.zip -L https://github.com/i3drobotics/phase/releases/download/${{ env.PHASE_VERSION }}/phase-${{ env.PHASE_VERSION }}-windows-x86_64.zip
+      - name: Install Phase
+        shell: powershell
+        run: |
+          Expand-Archive -Path phase-${{ env.PHASE_VERSION }}-windows-x86_64.zip -DestinationPath phase_install
+      # Build
+      - name: Build
+        shell: bash
+        run: |
+          mkdir -p build && cd build
+          cmake -G "Visual Studio 16 2019" -A x64 -DPhase_DIR="./phase_install/lib/cmake" ..
+          cmake --build . --config Release
+      # Unit Test
+      - name: Unit Test
+        shell: bash
+        run: |
+          cd build
+          ./phase_sample
+
+  # Deploy release on GitHub
+  deploy:
+    needs: [build-ubuntu, build-windows]
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v2
+      # Get project version
+      - name: Download version file artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: version-file-${{ github.sha }}-phase-cmake-release
+          path: versioning
+      - name: Get project version
+        shell: bash
+        run: |
+          PROJ_VER=$(cat versioning/version.txt)
+          echo "$PROJ_VER" > version.txt
+          echo "PROJ_VER=$PROJ_VER" >> $GITHUB_ENV
+      # Create release
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          prerelease: ${{ github.event.inputs.release_level == 'prerelease' }}
+          body_path: release.md
+          tag_name: v${{ env.PROJ_VER }}
+      # Get git variables
+      - name: Get commit variables
+        id: commit-vars
+        shell: bash
+        run: |
+          echo "##[set-output name=branch;]$(echo ${GITHUB_REF#refs/heads/})"
+          echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+      # Get release branch name
+      # 'preprod' for pre-release
+      # 'prod' for production release
+      - name: Get release branch
+        id: release-branch
+        shell: bash
+        run: |
+          export RELEASE_BRANCH="prod"
+          [[ ${{ github.event.inputs.release_level == 'prerelease' }} ]] && export RELEASE_BRANCH="preprod"
+          echo "::set-output name=branch_name::${RELEASE_BRANCH}"
+      # Merge branch into production
+      - name: Merge main -> prod
+        uses: devmasx/merge-branch@master
+        with:
+          type: now
+          target_branch: ${{ steps.release-branch.outputs.branch_name }}
+          github_token: ${{ github.token }}
+          message: merged ${{ steps.commit-vars.outputs.sha_short }}
+      # Merge main back to production
+      - name: Merge prod -> main
+        uses: devmasx/merge-branch@master
+        with:
+          type: now
+          from_branch: ${{ steps.release-branch.outputs.branch_name }}
+          target_branch: main
+          github_token: ${{ github.token }}
+          message: merged ${{ steps.commit-vars.outputs.sha_short }}
+
+  cleanup:
+      needs: [deploy]
+      runs-on: ubuntu-20.04
+
+      steps:
+        - uses: geekyeggo/delete-artifact@v1
+          with:
+            name: version-file-${{ github.sha }}-phase-cmake-release

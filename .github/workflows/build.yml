@@ -1,0 +1,84 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+  # Allow manual triggering
+  workflow_dispatch:
+
+env:
+  PHASE_VERSION: v0.1.2-4
+  PHASE_REPO: i3drobotics/phase
+
+jobs:
+  # Build / test
+  build-ubuntu:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-20.04]
+
+    steps:
+      - uses: actions/checkout@v2
+      # Install Phase
+      - name: Download Phase
+        shell: bash
+        run: |
+          curl --output phase-${{ env.PHASE_VERSION }}-${{ matrix.os }}-x86_64.tar.gz -L https://github.com/i3drobotics/phase/releases/download/${{ env.PHASE_VERSION }}/phase-${{ env.PHASE_VERSION }}-${{ matrix.os }}-x86_64.tar.gz
+      - name: Install Phase
+        shell: bash
+        run: |
+          mkdir phase_install
+          tar -xf phase-${{ env.PHASE_VERSION }}-${{ matrix.os }}-x86_64.tar.gz -C ./phase_install
+          sudo apt update
+          sudo apt install -y libavcodec-dev libavformat-dev libswscale-dev
+          sudo apt install -y libgl-dev liblapack-dev libblas-dev libgtk2.0-dev
+          sudo apt install -y libgstreamer1.0-0 libgstreamer-plugins-base1.0-0
+          sudo apt install -y zlib1g libstdc++6
+          sudo apt install -y libc6 libgcc1
+          sudo apt install -y patchelf
+      # Build
+      - name: Build
+        shell: bash
+        run: |
+          mkdir -p build && cd build
+          sudo apt-get update && cmake -DPhase_DIR="./phase_install/lib/cmake" ..
+          make -j$(nproc)
+      # Unit Test
+      - name: Unit Test
+        shell: bash
+        run: |
+          cd build
+          ./phase_sample
+
+# Build / test
+  build-windows:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-2019]
+
+    steps:
+      - uses: actions/checkout@v2
+      # Install Phase
+      - name: Download Phase
+        shell: bash
+        run: |
+          curl --output phase-${{ env.PHASE_VERSION }}-windows-x86_64.zip -L https://github.com/i3drobotics/phase/releases/download/${{ env.PHASE_VERSION }}/phase-${{ env.PHASE_VERSION }}-windows-x86_64.zip
+      - name: Install Phase
+        shell: powershell
+        run: |
+          Expand-Archive -Path phase-${{ env.PHASE_VERSION }}-windows-x86_64.zip -DestinationPath phase_install
+      # Build
+      - name: Build
+        shell: bash
+        run: |
+          mkdir -p build && cd build
+          cmake -G "Visual Studio 16 2019" -A x64 -DPhase_DIR="./phase_install/lib/cmake" ..
+          cmake --build . --config Release
+      # Unit Test
+      - name: Unit Test
+        shell: bash
+        run: |
+          cd build
+          ./phase_sample
