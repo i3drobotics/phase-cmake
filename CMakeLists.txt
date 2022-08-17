@@ -86,7 +86,7 @@ if (UNIX)
                         COMMAND cp -a -u
                         ${PHASE_LIBRARY_FILEPATH} $<TARGET_FILE_DIR:${PROJECT_NAME}>/)
         # change rpath for dynamic library to find dependencies in local directory
-        add_custom_command(TARGET ${PROJECT_NAME} PRE_BUILD
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
             COMMAND patchelf --set-rpath ${rpath_origin} $<TARGET_FILE_DIR:${PROJECT_NAME}>/${PHASE_LIBRARY_FILE}
         )
     endforeach()
