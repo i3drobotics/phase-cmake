@@ -8,10 +8,11 @@
  */
 
 #include <iostream>
-#include <phase/stereovision.h>
 #include <phase/stereocamera/stereocamera.h>
+#include <phase/stereomatcher/stereomatcher.h>
 #include <phase/calib/stereocalibration.h>
-#include <phase/stereoprocess.h>
+#include <phase/utils.h>
+#include <opencv2/highgui.hpp>
 
 int main() {  
     bool license_valid = I3DR::Phase::StereoI3DRSGM::isLicenseValid();
@@ -55,59 +56,63 @@ int main() {
     } else {
         matcher_type = I3DR::Phase::StereoMatcherType::STEREO_MATCHER_BM;
     }
-    I3DR::Phase::StereoVision* sv = new I3DR::Phase::StereoVision(device_info, matcher_type, left_yaml.c_str(), right_yaml.c_str());
-    if (!sv->isValidCalibration()) {
+    I3DR::Phase::AbstractStereoCamera* cam = I3DR::Phase::createStereoCamera(device_info);
+    I3DR::Phase::StereoCameraCalibration cal = I3DR::Phase::StereoCameraCalibration::calibrationFromYAML(left_yaml.c_str(), right_yaml.c_str());
+    if (!cal.isValid()) {
         std::cerr << "Failed to load valid calibration" << std::endl;
         return 1;
     }
+    I3DR::Phase::AbstractStereoMatcher* matcher = I3DR::Phase::createStereoMatcher(matcher_type);
 
-    std::cout << "StereoVision instance created" << std::endl;
     if (use_test_images) {
-        sv->setTestImagePaths(
+        cam->setTestImagePaths(
             left_image_file.c_str(),
             right_image_file.c_str()
         );
     }
     
     std::cout << "Connecting to camera..." << std::endl;
-    bool ret = sv->connect();
+    bool ret = cam->connect();
     std::cout << "Camera connected: " << ret << std::endl;
     if (ret) {
-        sv->setDownsampleFactor(downsample_factor);
-        sv->startCapture();
+        cam->setDownsampleFactor(downsample_factor);
+        cam->startCapture();
         std::cout << "Running non-threaded camera capture..." << std::endl;
         cv::Mat left_img, right_img;
         for (int i = 0; i < 3; i++) {
             std::cout << "Waiting for result..." << std::endl;
-            I3DR::Phase::StereoVisionReadResult read_result = sv->read();
+            I3DR::Phase::CameraReadResult read_result = cam->read();
             if (read_result.valid) {
-                std::cout << "Stereo result received" << std::endl;
-                std::cout << "Framerate: " << sv->getCamera()->getFrameRate() << std::endl;
-
-                cv::Mat disp_image_left = I3DR::Phase::scaleImage(read_result.left_image, 0.25);
-                cv::Mat disp_image_right = I3DR::Phase::scaleImage(read_result.right_image, 0.25);
-                cv::Mat norm_disp = I3DR::Phase::normaliseDisparity(read_result.disparity);
-                cv::Mat disp_image_disparity = I3DR::Phase::scaleImage(norm_disp, 0.25);
-                if (enable_vis){
-                    cv::imshow("left", disp_image_left);
-                    cv::imshow("right", disp_image_right);
-                    cv::imshow("disparity", disp_image_disparity);
-                    cv::waitKey(1);
+                std::cout << "Stereo read result received" << std::endl;
+                std::cout << "Framerate: " << cam->getFrameRate() << std::endl;
+                I3DR::Phase::StereoImagePair rect_pair = cal.rectify(read_result.left, read_result.right);
+                I3DR::Phase::StereoMatcherComputeResult compute_result = matcher->compute(rect_pair.left, rect_pair.right);
+                if (compute_result.valid){
+                    cv::Mat disp_image_left = I3DR::Phase::scaleImage(read_result.left, 0.25);
+                    cv::Mat disp_image_right = I3DR::Phase::scaleImage(read_result.right, 0.25);
+                    cv::Mat norm_disp = I3DR::Phase::normaliseDisparity(compute_result.disparity);
+                    cv::Mat disp_image_disparity = I3DR::Phase::scaleImage(norm_disp, 0.25);
+                    if (enable_vis){
+                        cv::imshow("left", disp_image_left);
+                        cv::imshow("right", disp_image_right);
+                        cv::imshow("disparity", disp_image_disparity);
+                        cv::waitKey(1);
+                    }
+                } else {
+                    std::cerr << "Failed to compute disparity" << std::endl;
                 }
             }
             else {
-                std::cout << "Failed to read stereo result" << std::endl;
+                std::cerr << "Failed to read stereo result" << std::endl;
                 break;
             }
         }
-        sv->disconnect();
+        cam->disconnect();
     }
-    ret = sv->connect();
+    ret = cam->connect();
     if (ret) {
-        sv->startCapture();
+        cam->startCapture();
         std::cout << "Running split threaded camera capture..." << std::endl;
-        auto cam = sv->getCamera();
-        auto matcher = sv->getMatcher();
         for (int i = 0; i < 3; i++) {
             cam->startReadThread();
             std::cout << "Waiting for result..." << std::endl;
@@ -115,9 +120,9 @@ int main() {
             I3DR::Phase::CameraReadResult cam_result = cam->getReadThreadResult();
             if (cam_result.valid) {
                 cv::Mat left_rect_image, right_rect_image;
-                sv->getCalibration()->rectify(
-                    cam_result.left_image,
-                    cam_result.right_image,
+                cal.rectify(
+                    cam_result.left,
+                    cam_result.right,
                     left_rect_image,
                     right_rect_image);
                 matcher->startComputeThread(left_rect_image, right_rect_image);
@@ -137,9 +142,9 @@ int main() {
                     while (cam->isReadThreadRunning()) {}
                     cam_result = cam->getReadThreadResult();
                     if (cam_result.valid) {
-                        sv->getCalibration()->rectify(
-                            cam_result.left_image,
-                            cam_result.right_image,
+                        cal.rectify(
+                            cam_result.left,
+                            cam_result.right,
                             left_rect_image,
                             right_rect_image);
                         disp_image_left = I3DR::Phase::scaleImage(left_rect_image, 0.25);
@@ -172,34 +177,7 @@ int main() {
             }
         }
 
-
-        std::cout << "Running threaded camera capture..." << std::endl;
-        for (int i = 0; i < 3; i++) {
-            sv->startReadThread();
-            std::cout << "Waiting for result..." << std::endl;
-            while (sv->isReadThreadRunning()) {}
-            I3DR::Phase::StereoVisionReadResult result = sv->getReadThreadResult();
-            if (result.valid) {
-                std::cout << "Stereo result received" << std::endl;
-                std::cout << "Framerate: " << sv->getCamera()->getFrameRate() << std::endl;
-                cv::Mat disp_image_left = I3DR::Phase::scaleImage(result.left_image, 0.25);
-                cv::Mat disp_image_right = I3DR::Phase::scaleImage(result.right_image, 0.25);
-                cv::Mat disp_image_disparity = I3DR::Phase::scaleImage(
-                    I3DR::Phase::normaliseDisparity(result.disparity), 0.25);
-                if (enable_vis){
-                    cv::imshow("left", disp_image_left);
-                    cv::imshow("right", disp_image_right);
-                    cv::imshow("disparity", disp_image_disparity);
-                    cv::waitKey(waitkey_delay);
-                }
-            }
-            else {
-                std::cout << "Failed to read stereo result" << std::endl;
-                break;
-            }
-        }
-
-        sv->disconnect();
+        cam->disconnect();
         std::cout << "Camera disconnected" << std::endl;
     }
     return 0;
