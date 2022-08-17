@@ -92,13 +92,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p build && cd build
-          sudo apt-get update && cmake -DPhase_DIR="./phase_install/lib/cmake" ..
+          sudo apt-get update && cmake -DPhase_DIR="./phase_install/lib/cmake" -DCMAKE_INSTALL_PREFIX="../install" ..
           make -j$(nproc)
-      # Unit Test
-      - name: Unit Test
+      # Test
+      - name: Test
         shell: bash
         run: |
-          cd build
+          cd build/bin
           ./phase_sample
 
   # Build / test on Windows
@@ -137,13 +137,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p build && cd build
-          cmake -G "Visual Studio 16 2019" -A x64 -DPhase_DIR="./phase_install/lib/cmake" ..
+          cmake -G "Visual Studio 16 2019" -A x64 -DPhase_DIR="./phase_install/lib/cmake" -DCMAKE_INSTALL_PREFIX="../install" ..
           cmake --build . --config Release
-      # Unit Test
-      - name: Unit Test
+      # Test
+      - name: Test
         shell: bash
         run: |
-          cd build
+          cd build/bin
           ./phase_sample
 
   # Deploy release on GitHub
