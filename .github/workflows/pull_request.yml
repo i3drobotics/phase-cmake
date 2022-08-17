@@ -41,11 +41,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p build && cd build
-          sudo apt-get update && cmake -DPhase_DIR="./phase_install/lib/cmake" ..
+          sudo apt-get update && cmake -DPhase_DIR="./phase_install/lib/cmake" -DCMAKE_INSTALL_PREFIX="../install" ..
           make -j$(nproc)
       # Unit Test
       - name: Unit Test
         shell: bash
         run: |
-          cd build
+          cd install/bin
           ./phase_sample
