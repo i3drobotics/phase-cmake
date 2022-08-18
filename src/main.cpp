@@ -22,7 +22,7 @@ int main() {
         std::cout << "Missing or invalid I3DRSGM license" << std::endl;
     }
 
-    std::string data_folder = "data";
+    std::string data_folder = "../../data";
     std::string left_yaml = data_folder + "/left.yaml";
     std::string right_yaml = data_folder + "/right.yaml";
     std::string left_image_file = data_folder + "/left.png";
