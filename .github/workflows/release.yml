@@ -144,7 +144,7 @@ jobs:
         shell: bash
         run: |
           cd build/bin
-          ./phase_sample
+          ./phase_sample.exe
 
   # Deploy release on GitHub
   deploy:
